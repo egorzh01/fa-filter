@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, Literal, TypeVar, get_type_hints
+from typing import Any, TypeVar, get_type_hints
 
 from pydantic import BaseModel, Field
 from pydantic._internal._generics import PydanticGenericMetadata
