@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, TypeVar, get_type_hints
+from typing import Annotated, Any, TypeVar, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, Field
 from pydantic._internal._generics import PydanticGenericMetadata
@@ -9,6 +9,8 @@ from pydantic._internal._model_construction import ModelMetaclass
 from sqlalchemy import Select
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql._typing import _ColumnExpressionArgument
+
+from fa_filter.core.exceptions import FAFilterError
 
 _OPERATORS = {
     "gt": lambda value, column: column.__gt__(value),
@@ -25,7 +27,15 @@ _OPERATORS = {
         column.has(value) if bool(value) else ~column.has(value)
     ),
 }
-_EXCLUDED_FIELDS = {"limit", "offset", "order_by"}
+
+Manual = "Manual"
+
+
+class FilterSettings:
+    """Filter settings: SQLAlchemy model and allowed sorting fields."""
+
+    model: type[DeclarativeBase] | None = None
+    allowed_orders_by: list[str] = []
 
 
 class _FilterMeta(ModelMetaclass):
@@ -53,39 +63,45 @@ class _FilterMeta(ModelMetaclass):
         if cls_name == "Filter":
             return new_cls
 
-        settings_cls = namespace.get("Settings")
-        if not settings_cls:
-            raise ValueError(f"Class {cls_name} must define Settings")
-
-        model = getattr(settings_cls, "model")
-        if not model:
-            raise ValueError(f"Class {cls_name} must define 'model' in Settings")
-
-        if not hasattr(settings_cls, "allowed_orders_by"):
-            settings_cls.allowed_orders_by = []
-
-        annotations = get_type_hints(new_cls)
-        for field_name in _EXCLUDED_FIELDS:
-            annotations.pop(field_name, None)
-
-        filter_map = {}
-        for attr_name in annotations:
-            try:
-                attr_name_split = attr_name.split("__")
-                if len(attr_name_split) != 2:
-                    raise ValueError(f"Unsupported filter '{attr_name}' in {cls_name}")
-                column_name, operator_key = attr_name_split
-                if operator_key not in _OPERATORS:
+        model = None
+        if settings_cls := namespace.get("Settings"):
+            model = getattr(settings_cls, "model")
+        else:
+            namespace["Settings"] = FilterSettings
+        annotations = {}
+        for field_name, field_type in get_type_hints(
+            new_cls, include_extras=True
+        ).items():
+            if field_name.startswith("__") and field_name.endswith("__"):
+                continue
+            if get_origin(field_type) is Annotated and Manual in get_args(field_type):
+                continue
+            elif not model:
+                raise FAFilterError(
+                    "For clarity, all filter fields without a Settings.model should be marked as manual"
+                )
+            annotations[field_name] = field_type
+        if model:
+            filter_map = {}
+            for attr_name in annotations:
+                try:
+                    attr_name_split = attr_name.split("__")
+                    if len(attr_name_split) != 2:
+                        raise ValueError(
+                            f"Unsupported filter '{attr_name}' in {cls_name}"
+                        )
+                    column_name, operator_key = attr_name_split
+                    if operator_key not in _OPERATORS:
+                        raise ValueError(
+                            f"Unsupported operator '{operator_key}' in {attr_name}"
+                        )
+                    column = getattr(model, column_name)
+                    filter_map[attr_name] = (column, operator_key)
+                except AttributeError as exc:
                     raise ValueError(
-                        f"Unsupported operator '{operator_key}' in {attr_name}"
-                    )
-                column = getattr(model, column_name)
-                filter_map[attr_name] = (column, operator_key)
-            except AttributeError as exc:
-                raise ValueError(
-                    f"Column '{column_name}' not found in model {model.__name__}"
-                ) from exc
-        new_cls.__filter_map__ = MappingProxyType(filter_map)
+                        f"Column '{column_name}' not found in model {model.__name__}"
+                    ) from exc
+            new_cls.__filter_map__ = MappingProxyType(filter_map)
         return new_cls
 
 
@@ -103,33 +119,30 @@ class Filter(BaseModel, metaclass=_FilterMeta):
         order_by: List of columns to sort by (prefix with '-' for descending order).
     """
 
-    __filter_map__ = {}
+    __filter_map__: dict[str, Any] = {}
+    __manual_fields__ = set()
 
-    limit: int | None = Field(
+    limit: Annotated[int | None, Manual] = Field(
         default=None,
         gt=0,
         description="Maximum number of items to return",
     )
-    offset: int | None = Field(
+    offset: Annotated[int | None, Manual] = Field(
         default=None,
         gt=0,
         description="Number of items to skip before starting to collect the result set",
     )
-    order_by: list[str] | None = Field(
+    order_by: Annotated[list[str] | None, Manual] = Field(
         default=None,
         description="List of column names to order by, prefixed with '-' for descending order. Order matters.",
     )
 
-    class Settings:
-        """Filter settings: SQLAlchemy model and allowed sorting fields."""
-
-        model: type[DeclarativeBase]
-        allowed_orders_by: list[str] = []
+    class Settings(FilterSettings):
+        pass
 
     def __init__(self, **data):
         super().__init__(**data)
         self.__filter_list: list[_ColumnExpressionArgument[bool]] = []
-        self.__parse()
 
     def __call__(self, stmt: Select[tuple[T]]) -> Select[tuple[T]]:
         """Applies filter, sorting, limit, and offset to the query."""
@@ -182,7 +195,7 @@ class Filter(BaseModel, metaclass=_FilterMeta):
         filters_data = self.model_dump(
             exclude_unset=True,
             exclude_none=True,
-            exclude=_EXCLUDED_FIELDS,
+            exclude=self.__manual_fields__,
         )
         for field_name, value in filters_data.items():
             column, operator_key = self.__filter_map__[field_name]

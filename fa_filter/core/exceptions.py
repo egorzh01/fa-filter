@@ -1,0 +1,2 @@
+class FAFilterError(Exception):
+    pass
