@@ -31,6 +31,14 @@ _OPERATORS = {
 Manual = "Manual"
 
 
+class reset(set):  # type: ignore
+    """
+    Класс для обозначения сброса родительский значений при наследовании
+    """
+
+    pass
+
+
 class FilterSettings:
     """Filter settings: SQLAlchemy model and allowed sorting fields."""
 
@@ -39,8 +47,7 @@ class FilterSettings:
 
 
 class _FilterMeta(ModelMetaclass):
-
-    def __new__(
+    def __new__(  # noqa: PLR0912
         mcs,
         cls_name: str,
         bases: tuple[type[Any], ...],
@@ -49,7 +56,7 @@ class _FilterMeta(ModelMetaclass):
         __pydantic_reset_parent_namespace__: bool = True,
         _create_model_module: str | None = None,
         **kwargs: Any,
-    ):
+    ) -> type[Filter]:
         new_cls = super().__new__(
             mcs,
             cls_name,
@@ -63,22 +70,29 @@ class _FilterMeta(ModelMetaclass):
         if cls_name == "Filter":
             return new_cls
 
+        if not isinstance(new_cls.__manual_fields__, set):  # type: ignore
+            raise ValueError(f"{cls_name}.__manual_fields__ is not a set")
+
+        if not isinstance(new_cls.__manual_fields__, reset):  # type: ignore
+            pass  # TODO Здесь нужно сделать наследование
+
         model = None
         if settings_cls := namespace.get("Settings"):
-            model = getattr(settings_cls, "model")
+            model = settings_cls.model
         else:
             namespace["Settings"] = FilterSettings
         annotations = {}
         for field_name, field_type in get_type_hints(
-            new_cls, include_extras=True
+            new_cls, include_extras=True,
         ).items():
             if field_name.startswith("__") and field_name.endswith("__"):
                 continue
             if get_origin(field_type) is Annotated and Manual in get_args(field_type):
+                new_cls.__manual_fields__.add(field_name)  # type: ignore
                 continue
             elif not model:
                 raise FAFilterError(
-                    "For clarity, all filter fields without a Settings.model should be marked as manual"
+                    "For clarity, all filter fields without a Settings.model should be marked as manual",
                 )
             annotations[field_name] = field_type
         if model:
@@ -86,22 +100,22 @@ class _FilterMeta(ModelMetaclass):
             for attr_name in annotations:
                 try:
                     attr_name_split = attr_name.split("__")
-                    if len(attr_name_split) != 2:
+                    if len(attr_name_split) != 2:  # noqa: PLR2004
                         raise ValueError(
-                            f"Unsupported filter '{attr_name}' in {cls_name}"
+                            f"Unsupported filter '{attr_name}' in {cls_name}",
                         )
                     column_name, operator_key = attr_name_split
                     if operator_key not in _OPERATORS:
                         raise ValueError(
-                            f"Unsupported operator '{operator_key}' in {attr_name}"
+                            f"Unsupported operator '{operator_key}' in {attr_name}",
                         )
                     column = getattr(model, column_name)
                     filter_map[attr_name] = (column, operator_key)
                 except AttributeError as exc:
                     raise ValueError(
-                        f"Column '{column_name}' not found in model {model.__name__}"
+                        f"Column '{column_name}' not found in model {model.__name__}",
                     ) from exc
-            new_cls.__filter_map__ = MappingProxyType(filter_map)
+            new_cls.__filter_map__ = MappingProxyType(filter_map)  # type: ignore
         return new_cls
 
 
@@ -120,7 +134,9 @@ class Filter(BaseModel, metaclass=_FilterMeta):
     """
 
     __filter_map__: dict[str, Any] = {}
-    __manual_fields__ = set()
+    __manual_fields__: set[str] = (
+        reset()
+    )  # Возможно нужно добавть при наследовании и добавть функцию reset() которая сбрасывает __manual_fields__ при наследовании reset("limit", "offset", "order_by") например так, такой способ не берет __manual_fields__ родителя  # Возможно нужно добавть при наследовании и добавть функцию reset() которая сбрасывает __manual_fields__ при наследовании reset("limit", "offset", "order_by") например так, такой способ не берет __manual_fields__ родителя
 
     limit: Annotated[int | None, Manual] = Field(
         default=None,
@@ -140,7 +156,7 @@ class Filter(BaseModel, metaclass=_FilterMeta):
     class Settings(FilterSettings):
         pass
 
-    def __init__(self, **data):
+    def __init__(self, /, **data: Any) -> None:
         super().__init__(**data)
         self.__filter_list: list[_ColumnExpressionArgument[bool]] = []
 
@@ -165,7 +181,7 @@ class Filter(BaseModel, metaclass=_FilterMeta):
             _order_by = []
             for column_name in self.order_by:
                 direction = "desc" if column_name.startswith("-") else "asc"
-                column_name = column_name.lstrip("-")
+                column_name = column_name.lstrip("-")  # noqa: PLW2901
                 if column_name not in self.Settings.allowed_orders_by:
                     continue
                 column = getattr(self.Settings.model, column_name)
@@ -187,7 +203,7 @@ class Filter(BaseModel, metaclass=_FilterMeta):
             return stmt.offset(self.offset)
         return stmt
 
-    def __parse(self):
+    def __parse(self) -> None:
         """Generates a list of filters based on model data."""
 
         if not self.__filter_map__:

@@ -1,25 +1,85 @@
 [project]
 name = "fa-filter"
-version = "0.2.0"
-description = ""
-authors = [
-    {name = "eac0de",email = "egor2001zhukov@gmail.com"}
-]
-license = "MIT"
+version = "0.2.1"
+description = "Filter, sort, limit, and offset by pydantic"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
-    "pydantic (>=2.0,<3.0.0)",
-    "sqlalchemy (>=2.0,<3.0.0)"
+    "pydantic>=2.11.4",
+    "sqlalchemy>=2.0.41",
 ]
 
-[tool.poetry]
-packages = [{include = "fa_filter"}]
+[tool.ruff]
+target-version = "py312"
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    ".vscode",
+    "examples",
+]
+line-length = 88
+indent-width = 4
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle
+    "F", # Pyflakes
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I", # isort
+    "PL", # pylint
+]
+ignore = [
+    "E501", # line too long
+]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+follow_untyped_imports = true
+disallow_untyped_calls = false
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    ".vscode",
+    "tests",
+    "examples",
+]
+plugins = [
+    "pydantic.mypy",
+    "sqlalchemy.ext.mypy.plugin",
+]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.5"
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "fastapi>=0.115.12",
+    "mypy>=1.15.0",
+    "pre-commit>=4.2.0",
+    "ruff>=0.11.10",
+    "twine>=6.1.0",
+]

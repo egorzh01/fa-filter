@@ -44,7 +44,6 @@ class Document(Base):
 
 
 class DocumentsFilter(Filter):
-
     autosave__exists: bool | None = None
     name__like: str | None = Field(
         description="Document name pattern",  # Display in FastAPI Swagger
