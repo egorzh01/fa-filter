@@ -210,7 +210,6 @@ class Filter(BaseModel, metaclass=_FilterMeta):
             return
         filters_data = self.model_dump(
             exclude_unset=True,
-            exclude_none=True,
             exclude=self.__manual_fields__,
         )
         for field_name, value in filters_data.items():

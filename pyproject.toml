@@ -1,6 +1,6 @@
 [project]
 name = "fa-filter"
-version = "0.2.1"
+version = "0.2.2"
 description = "Filter, sort, limit, and offset by pydantic"
 readme = "README.md"
 requires-python = ">=3.12"
